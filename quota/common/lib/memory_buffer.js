@@ -96,7 +96,15 @@ MemoryBuffer.prototype.apply = function(options, cb) {
 
 MemoryBuffer.prototype.flushBuffer = function() {
   _.each(this.buckets, function(bucket) {
-    bucket.flushBucket();
+    if (bucket.count > 0 ) { // settle down quota locally
+      bucket.calculateExpiration();
+      var now = _.now();
+      if (now > bucket.expires) {
+      debug('In flushBuffer, Bucket expired at: %s',new Date(bucket.expires).toISOString());
+      bucket.reset(now); // Quota bucket has expired. The timer also runs but only periodically
+     }
+      bucket.flushBucket();
+    }
   });
 };
 
@@ -213,15 +221,22 @@ Bucket.prototype.flushBucket = function(cb) {
       debug('clockOffset:', offset);
     }
 
+    let isCountCarriedOver = (remoteExpires < reply.expiryTime && self.remoteCount < reply.used ) ? true : false;
     var sameTimeBucket = (self.expires === localExpires) &&                        // same local time bucket?
-                         (!remoteExpires || remoteExpires === self.remoteExpires); // same remote time bucket?
+                         (!remoteExpires || remoteExpires == reply.expiryTime ||  // same remote time bucket?
+                          isCountCarriedOver ); // consider carried over counts
     if (!sameTimeBucket) {
       debug('new time bucket');
       return cb ? cb() : null;
     }
+    if ( !isCountCarriedOver ) {
+      self.remoteExpires = reply.expiryTime;
+    }
+    // self.remoteExpires = reply.expiryTime;
+    if ( reply.used > self.remoteCount ) {
+      self.remoteCount = reply.used;
+    }
 
-    self.remoteExpires = reply.expiryTime;
-    self.remoteCount = reply.used;
     self.count -= options.weight; // subtract applied value
 
     // if it wasn't set because offset wasn't available, calc expiration

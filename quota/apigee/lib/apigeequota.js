@@ -267,7 +267,7 @@ ApigeeRemoteQuota.prototype.apply = function(opts, cb) {
     debug('quotas/apply response statusCode: %s, responseBody: %j', resp.statusCode, logRespBody);
     if (resp.statusCode / 100 === 2) { // 2xx
       // result from apigee is not quite what the module expects
-      body.expiryTime = body.expiryTime - body.timestamp;
+      // body.expiryTime = body.expiryTime - body.timestamp;
       body.isAllowed = (body.used <= body.allowed);
       cb(undefined, body);
     } else {
