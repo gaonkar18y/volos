@@ -259,11 +259,9 @@ ApigeeRemoteQuota.prototype.apply = function(opts, cb) {
   this.quota.request.post(options, function(err, resp, body) {
     if (err) { return cb(err); }
     // transforming the date format in response to make it more readable
-    const logRespBody = {
-      ...body,
-      expiryTime:new Date(body.expiryTime).toISOString(),
-      timestamp:new Date(body.timestamp).toISOString()
-    }
+    let logRespBody = JSON.parse(JSON.stringify(body));
+    logRespBody.expiryTime = new Date(body.expiryTime).toISOString();
+    logRespBody.timestamp = new Date(body.timestamp).toISOString();
     debug('quotas/apply response statusCode: %s, responseBody: %j', resp.statusCode, logRespBody);
     if (resp.statusCode / 100 === 2) { // 2xx
       // result from apigee is not quite what the module expects
