@@ -131,7 +131,9 @@ Bucket.prototype.reset = function(time) {
   this.remoteCount = 0;
   this.remoteExpires = undefined;
   this.flushing = false;
-  this.remoteExpiryTimestamp =  undefined;
+  this.remoteExpiryTimestamp = undefined;
+  this.remoteApplyResponse = {};
+  this.weightAppliedOnRemote = 0;
 };
 
 Bucket.prototype.calculateExpiration = function() {
@@ -173,7 +175,6 @@ Bucket.prototype.apply = function(time, options, cb) {
   var allow = options.allow || this.options.allow;
 
   var count = this.count + this.remoteCount;
-  debug('Bucket:%s applying check,count: %d, allow: %d',this.options.identifier, count, allow);
   if (!this.expiryTime) { this.calculateExpiration(); }
   var result = {
     allowed: allow,
@@ -182,6 +183,9 @@ Bucket.prototype.apply = function(time, options, cb) {
     expiryTime: this.expires - now,
     remoteApplyFailed: this.owner.remoteApplyFailed 
   };
+  debug('applying quota check:Bucket=%s,count=%d,expires=%s,allow=%d,isAllowed=%s,statusCode=%d,weight_sent=%d,remoteCount=%d,remoteExpiry=%s,remote_exceeded=%d,remote_available=%d,debugMpId=%s',
+  this.options.identifier, count,this.expires, allow, result.isAllowed, ( result.isAllowed ? 200 : 403 ),this.weightAppliedOnRemote, this.remoteCount, ( this.remoteExpiryTimestamp || ''),
+  (this.remoteApplyResponse.exceeded || ''), ( this.remoteApplyResponse.available || ''), (this.remoteApplyResponse.debugMpId || ''));
 
   cb(null, result);
 
@@ -202,6 +206,7 @@ Bucket.prototype.flushBucket = function(cb) {
     weight: this.count
   };
   var self = this;
+  self.weightAppliedOnRemote = options.weight;
   self.owner.spi.apply(options, function(err, reply) {
     self.flushing = false;
     if (err) {
@@ -233,6 +238,8 @@ Bucket.prototype.flushBucket = function(cb) {
       debug('new time bucket');
       return cb ? cb() : null;
     }
+
+    self.remoteApplyResponse = reply;
 
     self.remoteExpires = reply.expiryTime;
     self.remoteCount = reply.used;
