@@ -134,6 +134,7 @@ Bucket.prototype.reset = function(time) {
   this.remoteExpiryTimestamp = undefined;
   this.remoteApplyResponse = {};
   this.weightAppliedOnRemote = 0;
+  this.remoteApplyRespTime = 0;
 };
 
 Bucket.prototype.calculateExpiration = function() {
@@ -183,9 +184,11 @@ Bucket.prototype.apply = function(time, options, cb) {
     expiryTime: this.expires - now,
     remoteApplyFailed: this.owner.remoteApplyFailed 
   };
-  debug('applying quota check:Bucket=%s,count=%d,expires=%s,allow=%d,isAllowed=%s,statusCode=%d,weight_sent=%d,remoteCount=%d,remoteExpiry=%s,remote_exceeded=%d,remote_available=%d,debugMpId=%s',
+
+  debug('applying quota check:Bucket=%s,count=%d,expires=%s,allow=%d,isAllowed=%s,statusCode=%d,weight_sent=%d,remoteCount=%d,remoteExpiry=%s,'+
+  'remote_exceeded=%d,remote_available=%d,debugMpId=%s,remote_timestamp=%s,respTime=%d',
   this.options.identifier, count,this.expires, allow, result.isAllowed, ( result.isAllowed ? 200 : 403 ),this.weightAppliedOnRemote, this.remoteCount, ( this.remoteExpiryTimestamp || ''),
-  (this.remoteApplyResponse.exceeded || ''), ( this.remoteApplyResponse.available || ''), (this.remoteApplyResponse.debugMpId || ''));
+  (this.remoteApplyResponse.exceeded || ''), ( this.remoteApplyResponse.available || ''), (this.remoteApplyResponse.debugMpId || ''),(this.remoteApplyResponse.timestamp || ''), this.remoteApplyRespTime);
 
   cb(null, result);
 
@@ -206,7 +209,7 @@ Bucket.prototype.flushBucket = function(cb) {
     weight: this.count
   };
   var self = this;
-  self.weightAppliedOnRemote = options.weight;
+  var flushStartTime = _.now();
   self.owner.spi.apply(options, function(err, reply) {
     self.flushing = false;
     if (err) {
@@ -240,6 +243,8 @@ Bucket.prototype.flushBucket = function(cb) {
     }
 
     self.remoteApplyResponse = reply;
+    self.remoteApplyRespTime = _.now() - flushStartTime;
+    self.weightAppliedOnRemote = options.weight;
 
     self.remoteExpires = reply.expiryTime;
     self.remoteCount = reply.used;
