@@ -60,7 +60,7 @@ function MemoryBuffer(spi, options) {
   var self = this;
   let intervalCount = 0;
   self.bucketTimer = setInterval(function() {
-    if(options.timeUnit === '30days'){
+    if(options.useIntervalCount){
       if(++intervalCount === options.interval){
         intervalCount=0;
         trimTokens(self);
@@ -143,6 +143,7 @@ Bucket.prototype.calculateExpiration = function() {
   if (startTime) {
     // "calendar" start quota -- calculate time until the end of the bucket
     var remaining = (time - startTime) % timeInterval;
+    debug('Using startTime ,remaining = %d', remaining);
     this.expires = time + timeInterval - remaining;
 
   } else {

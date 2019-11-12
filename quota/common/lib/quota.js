@@ -53,7 +53,7 @@ function Quota(Spi, o) {
   options.allow = checkNumber(o.allow, 'allow') || 1;
   options.rollingWindow = o.rollingWindow || false;
   options.bufferSize = checkNumber(o.bufferSize, 'bufferSize') || 0;
-
+  options.useIntervalCount = false;
   if (TimeUnits.indexOf(options.timeUnit) < 0) {
     throw new Error(util.format('Invalid timeUnit %s', options.timeUnit));
   }
@@ -69,13 +69,24 @@ function Quota(Spi, o) {
     options.timeInterval = HOUR;
   } else if ('day' === options.timeUnit) {
     options.timeInterval = DAY;
+    if ( options.interval > 24) {
+      options.useIntervalCount = true;
+    }
   } else if ('week' === options.timeUnit) {
     options.timeInterval = WEEK;
+    if ( options.interval > 3) {
+      options.timeInterval = DAY;
+      options.interval*=7;
+      options.useIntervalCount = true;
+    }
   } else if ('month' === options.timeUnit) {
-    options.timeInterval = MONTH;
+    options.timeInterval = DAY;
+    options.interval*=31;
+    options.useIntervalCount = true;
   } else if ('30days' === options.timeUnit) {
     options.timeInterval = DAY;
     options.interval*=30;
+    options.useIntervalCount = true;
   }
 
   if (options.bufferSize && !options.bufferTimeout) { options.bufferTimeout = MINUTE; }
@@ -94,7 +105,7 @@ function Quota(Spi, o) {
     }
   }
 
-  if(options.timeUnit !== '30days') {
+  if( !options.useIntervalCount ) {
     options.timeInterval *= options.interval;
   }
 
