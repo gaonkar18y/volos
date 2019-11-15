@@ -134,7 +134,10 @@ Bucket.prototype.reset = function(time) {
   this.remoteCount = 0;
   this.remoteExpires = undefined;
   this.flushing = false;
-  this.remoteExpiryTimestamp =  undefined;
+  this.remoteExpiryTimestamp = undefined;
+  this.remoteApplyResponse = {};
+  this.weightAppliedOnRemote = 0;
+  this.remoteApplyRespTime = 0;
   let self = this;
   sharedMemory.read(this.options.identifier,function(err, value){
     debug('Shared memory value for %s = %j',self.options.identifier,value);
@@ -145,7 +148,6 @@ Bucket.prototype.reset = function(time) {
       self.calculateExpiration();
     }
   });
-  
 };
 
 Bucket.prototype.calculateExpiration = function() {
@@ -190,6 +192,11 @@ Bucket.prototype.apply = function(time, options, cb) {
     remoteApplyFailed: this.owner.remoteApplyFailed 
   };
 
+  debug('applying quota check:Bucket=%s,count=%d,expires=%s,allow=%d,isAllowed=%s,statusCode=%d,weight_sent=%d,remoteCount=%d,remoteExpiry=%s,'+
+  'remote_exceeded=%d,remote_available=%d,debugMpId=%s,remote_timestamp=%s,respTime=%d',
+  this.options.identifier, count,this.expires, allow, result.isAllowed, ( result.isAllowed ? 200 : 403 ),this.weightAppliedOnRemote, this.remoteCount, ( this.remoteExpiryTimestamp || ''),
+  (this.remoteApplyResponse.exceeded || ''), ( this.remoteApplyResponse.available || ''), (this.remoteApplyResponse.debugMpId || ''),(this.remoteApplyResponse.timestamp || ''), this.remoteApplyRespTime);
+
   cb(null, result);
 
   if (!this.remoteExpires || (this.count % this.owner.options.bufferSize === 0)) {
@@ -209,6 +216,7 @@ Bucket.prototype.flushBucket = function(cb) {
     weight: this.count
   };
   var self = this;
+  var flushStartTime = _.now();
   self.owner.spi.apply(options, function(err, reply) {
     self.flushing = false;
     if (err) {
@@ -240,6 +248,10 @@ Bucket.prototype.flushBucket = function(cb) {
       debug('new time bucket');
       return cb ? cb() : null;
     }
+
+    self.remoteApplyResponse = reply;
+    self.remoteApplyRespTime = _.now() - flushStartTime;
+    self.weightAppliedOnRemote = options.weight;
 
     self.remoteExpires = reply.expiryTime;
     self.remoteCount = reply.used;
