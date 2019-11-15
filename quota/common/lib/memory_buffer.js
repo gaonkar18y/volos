@@ -132,6 +132,7 @@ Bucket.prototype.reset = function(time) {
   this.remoteExpires = undefined;
   this.flushing = false;
   this.remoteExpiryTimestamp =  undefined;
+  this.calculateExpiration();
 };
 
 Bucket.prototype.calculateExpiration = function() {
@@ -139,26 +140,16 @@ Bucket.prototype.calculateExpiration = function() {
 
   var startTime = this.owner.options.startTime;
   var timeInterval = this.owner.options.timeInterval;
-
+  if ( this.owner.options.useIntervalCount ) {
+    timeInterval *= this.owner.options.interval;
+  }
+  let remaining = 0;
   if (startTime) {
     // "calendar" start quota -- calculate time until the end of the bucket
-    var remaining = (time - startTime) % timeInterval;
-    debug('Using startTime ,remaining = %d', remaining);
-    this.expires = time + timeInterval - remaining;
-
-  } else {
-
-    if ('month' === this.options.timeUnit) {
-
-      var date = new Date(time);
-      return new Date(date.getFullYear(), date.getMonth() + 1, 1) - 1 + this.owner.clockOffset; // last ms of this month
-
-    } else {
-
-      // Default quota type -- start counting from now
-      this.expires = time + timeInterval;
-    }
+    remaining = (time - startTime) % timeInterval;
   }
+  this.expires = time + timeInterval - remaining;
+  debug('Bucket: %s expires set to: %s', this.options.identifier, new Date(this.expires).toISOString());
 };
 
 Bucket.prototype.apply = function(time, options, cb) {
@@ -175,7 +166,6 @@ Bucket.prototype.apply = function(time, options, cb) {
 
   var count = this.count + this.remoteCount;
   debug('Bucket:%s applying check,count: %d, allow: %d',this.options.identifier, count, allow);
-  if (!this.expiryTime) { this.calculateExpiration(); }
   var result = {
     allowed: allow,
     used: count,
