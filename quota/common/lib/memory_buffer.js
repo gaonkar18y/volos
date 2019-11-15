@@ -27,6 +27,8 @@ var assert = require('assert');
 var Quota = require('./quota');
 var _ = require('underscore');
 var debug = require('debug')('quota');
+const memoredpath = './third_party/memored/index';
+var sharedMemory = require(memoredpath);
 
 /*
  * options.bufferSize (Number) optional, use a memory buffer up to bufferSize to hold quota elements
@@ -60,7 +62,7 @@ function MemoryBuffer(spi, options) {
   var self = this;
   let intervalCount = 0;
   self.bucketTimer = setInterval(function() {
-    if(options.timeUnit === '30days'){
+    if(options.useIntervalCount){
       if(++intervalCount === options.interval){
         intervalCount=0;
         trimTokens(self);
@@ -121,6 +123,7 @@ function Bucket(time, options, owner) {
   this.options = options;
   this.owner = owner;
   this.reset(time);
+  this.resetCount=0;
 }
 
 Bucket.prototype.reset = function(time) {
@@ -135,6 +138,16 @@ Bucket.prototype.reset = function(time) {
   this.remoteApplyResponse = {};
   this.weightAppliedOnRemote = 0;
   this.remoteApplyRespTime = 0;
+  let self = this;
+  sharedMemory.read(this.options.identifier,function(err, value){
+    debug('Shared memory value for %s = %j',self.options.identifier,value);
+    if ( value ) {
+      self.expires = value;
+      debug('Reusing expiry : %s on Bucket: %s resetCount=', new Date(self.expires).toISOString(), self.options.identifier);
+    } else {
+      self.calculateExpiration();
+    }
+  });
 };
 
 Bucket.prototype.calculateExpiration = function() {
@@ -142,25 +155,19 @@ Bucket.prototype.calculateExpiration = function() {
 
   var startTime = this.owner.options.startTime;
   var timeInterval = this.owner.options.timeInterval;
-
+  if ( this.owner.options.useIntervalCount ) {
+    timeInterval *= this.owner.options.interval;
+  }
+  let remaining = 0;
   if (startTime) {
     // "calendar" start quota -- calculate time until the end of the bucket
-    var remaining = (time - startTime) % timeInterval;
-    this.expires = time + timeInterval - remaining;
-
-  } else {
-
-    if ('month' === this.options.timeUnit) {
-
-      var date = new Date(time);
-      return new Date(date.getFullYear(), date.getMonth() + 1, 1) - 1 + this.owner.clockOffset; // last ms of this month
-
-    } else {
-
-      // Default quota type -- start counting from now
-      this.expires = time + timeInterval;
-    }
+    remaining = (time - startTime) % timeInterval;
   }
+  this.expires = time + timeInterval - remaining;
+  let ttl = this.expires-_.now();
+  debug('Setting expires ttl = %d', ttl);
+  sharedMemory.store(this.options.identifier,this.expires, this.expires-_.now());
+  debug('Bucket: %s expires set to: %s', this.options.identifier, new Date(this.expires).toISOString());
 };
 
 Bucket.prototype.apply = function(time, options, cb) {
@@ -176,7 +183,7 @@ Bucket.prototype.apply = function(time, options, cb) {
   var allow = options.allow || this.options.allow;
 
   var count = this.count + this.remoteCount;
-  if (!this.expiryTime) { this.calculateExpiration(); }
+  debug('Bucket:%s applying check,count: %d, allow: %d',this.options.identifier, count, allow);
   var result = {
     allowed: allow,
     used: count,
