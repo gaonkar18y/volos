@@ -27,6 +27,8 @@ var assert = require('assert');
 var Quota = require('./quota');
 var _ = require('underscore');
 var debug = require('debug')('quota');
+const memoredpath = './third_party/memored/index';
+var sharedMemory = require(memoredpath);
 
 /*
  * options.bufferSize (Number) optional, use a memory buffer up to bufferSize to hold quota elements
@@ -121,6 +123,7 @@ function Bucket(time, options, owner) {
   this.options = options;
   this.owner = owner;
   this.reset(time);
+  this.resetCount=0;
 }
 
 Bucket.prototype.reset = function(time) {
@@ -132,7 +135,17 @@ Bucket.prototype.reset = function(time) {
   this.remoteExpires = undefined;
   this.flushing = false;
   this.remoteExpiryTimestamp =  undefined;
-  this.calculateExpiration();
+  let self = this;
+  sharedMemory.read(this.options.identifier,function(err, value){
+    debug('Shared memory value for %s = %j',self.options.identifier,value);
+    if ( value ) {
+      self.expires = value;
+      debug('Reusing expiry : %s on Bucket: %s resetCount=', new Date(self.expires).toISOString(), self.options.identifier);
+    } else {
+      self.calculateExpiration();
+    }
+  });
+  
 };
 
 Bucket.prototype.calculateExpiration = function() {
@@ -149,6 +162,9 @@ Bucket.prototype.calculateExpiration = function() {
     remaining = (time - startTime) % timeInterval;
   }
   this.expires = time + timeInterval - remaining;
+  let ttl = this.expires-_.now();
+  debug('Setting expires ttl = %d', ttl);
+  sharedMemory.store(this.options.identifier,this.expires, this.expires-_.now());
   debug('Bucket: %s expires set to: %s', this.options.identifier, new Date(this.expires).toISOString());
 };
 
