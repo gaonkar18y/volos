@@ -29,6 +29,7 @@ var _ = require('underscore');
 var debug = require('debug')('quota');
 const memoredpath = './third_party/memored/index';
 var sharedMemory = require(memoredpath);
+const cluster = require('cluster')
 
 /*
  * options.bufferSize (Number) optional, use a memory buffer up to bufferSize to hold quota elements
@@ -53,6 +54,7 @@ function MemoryBuffer(spi, options) {
   this.buckets = {};
   this.clockOffset = undefined;
   this.remoteApplyFailed =  false;
+  this.isMultiNodeEmg = true;
 
   assert(options.timeInterval);
   if (options.startTime) {
@@ -123,7 +125,31 @@ function Bucket(time, options, owner) {
   this.options = options;
   this.owner = owner;
   this.reset(time);
-  this.resetCount=0;
+  // read and update shared memory
+  let self = this;
+  this.readSharedMemTimer = setInterval(function() {
+    self.flushLocalMemory();
+  }, 200);
+
+}
+
+Bucket.prototype.flushLocalMemory = function() {
+  let self = this;
+  let key = self.options.identifier+'Counts';
+  sharedMemory.read(key,function(err, value){
+    debug('Shared memory value for %s = %j', key , value);
+    let workerId = ''+cluster.worker.id;
+    value = value || {}
+    let localSharedCount = 0;
+    Object.keys(value).forEach(function(valKey){
+    if ( valKey !== workerId) {
+      localSharedCount += value[valKey];
+    }
+    });
+    self.localSharedCount = localSharedCount;
+    value[workerId] = self.count;
+    sharedMemory.store(key, value, self.expires-_.now());
+  });
 }
 
 Bucket.prototype.reset = function(time) {
@@ -135,12 +161,13 @@ Bucket.prototype.reset = function(time) {
   this.remoteExpires = undefined;
   this.flushing = false;
   this.remoteExpiryTimestamp =  undefined;
+  this.localSharedCount = 0;
   let self = this;
   sharedMemory.read(this.options.identifier,function(err, value){
     debug('Shared memory value for %s = %j',self.options.identifier,value);
     if ( value ) {
       self.expires = value;
-      debug('Reusing expiry : %s on Bucket: %s resetCount=', new Date(self.expires).toISOString(), self.options.identifier);
+      debug('Reusing expiry : %s on Bucket: %s ', new Date(self.expires).toISOString(), self.options.identifier);
     } else {
       self.calculateExpiration();
     }
@@ -181,6 +208,9 @@ Bucket.prototype.apply = function(time, options, cb) {
   var allow = options.allow || this.options.allow;
 
   var count = this.count + this.remoteCount;
+  if ( !this.flushing ){
+    this.localSharedCount
+  }
   debug('Bucket:%s applying check,count: %d, allow: %d',this.options.identifier, count, allow);
   var result = {
     allowed: allow,
@@ -198,9 +228,9 @@ Bucket.prototype.apply = function(time, options, cb) {
 };
 
 Bucket.prototype.flushBucket = function(cb) {
-  if (this.flushing || (!this.count && this.remoteExpires)) { return cb ? cb() : null; }
+  if (this.flushing || !this.owner.isMultiNodeEmg || (!this.count && this.remoteExpires)) { return cb ? cb() : null; }
   this.flushing = true
-
+  
   debug('flushing bucket: ', this.options.identifier);
   var localExpires = this.expires;
   var remoteExpires = this.remoteExpires;
@@ -210,7 +240,9 @@ Bucket.prototype.flushBucket = function(cb) {
   };
   var self = this;
   self.owner.spi.apply(options, function(err, reply) {
-    self.flushing = false;
+    setTimeout(function(){ // time for all the workers to settle down
+      self.flushing = false;
+    }, 1500)
     if (err) {
       if (self.owner.options.failOpen === true ) {
         self.owner.remoteApplyFailed = true;
@@ -240,7 +272,7 @@ Bucket.prototype.flushBucket = function(cb) {
       debug('new time bucket');
       return cb ? cb() : null;
     }
-
+    self.flushLocalMemory();
     self.remoteExpires = reply.expiryTime;
     self.remoteCount = reply.used;
     if ( reply.expiryTimestamp ) {
