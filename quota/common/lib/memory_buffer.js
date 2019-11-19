@@ -209,7 +209,7 @@ Bucket.prototype.apply = function(time, options, cb) {
 
   var count = this.count + this.remoteCount;
   if ( !this.flushing ){
-    this.localSharedCount
+    count+=this.localSharedCount;
   }
   debug('Bucket:%s applying check,count: %d, allow: %d',this.options.identifier, count, allow);
   var result = {
@@ -242,7 +242,7 @@ Bucket.prototype.flushBucket = function(cb) {
   self.owner.spi.apply(options, function(err, reply) {
     setTimeout(function(){ // time for all the workers to settle down
       self.flushing = false;
-    }, 1500)
+    }, 500)
     if (err) {
       if (self.owner.options.failOpen === true ) {
         self.owner.remoteApplyFailed = true;
